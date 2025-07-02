@@ -6,7 +6,7 @@ JAR="$APP_HOME/monitoring.jar"
 CONFIG="$APP_HOME/application.properties"
 LOG="$APP_HOME/monitoring.log"
 PID_FILE="$APP_HOME/monitoring.pid"
-BACKUP_LOG="$APP_HOME/monitoring.log.$(date +%Y%m%d%H%M%S)"
+BACKUP_LOG="$APP_HOME/log/monitoring.log.$(date '+%Y-%m-%d-%H:%M:%S')"
 
 # 1. 单实例检查
 if [[ -f "$PID_FILE" ]]; then
