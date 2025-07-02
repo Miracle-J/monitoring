@@ -32,11 +32,11 @@ public class TwinBaseController {
         System.out.println("进入接口："+input);
         return statusChangeWebsocketHandler.ueForward(input);
     }
-//
-//    /**
-//     * 获取当前服务状态
-//     * @return
-//     */
+
+    /**
+     * 获取当前服务状态
+     * @return
+     */
     @GetMapping("/serverStatus")
     public R serverStatus (){
         return R.ok();

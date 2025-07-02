@@ -8,9 +8,7 @@ import com.baidu.monitoring.util.R;
 import okhttp3.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -19,24 +17,22 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import javax.annotation.PreDestroy;
 import java.io.*;
+import java.net.MalformedURLException;
 import java.net.ServerSocket;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 import static com.baidu.monitoring.util.SessionManager.*;
-
 
 
 @Component
 public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(ServerInitializer.class);
-
-    @Autowired
-    @Lazy
-    private ServerInitializer startServer;
 
     // 下载目录通过配置文件传入
     @Value("${DownloadDir}")
@@ -68,12 +64,13 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
 
     /**
      * 创建websocket连接
+     *
      * @param session
      * @throws Exception
      */
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
-        logger.info("连接已建立：" + session.getId()+";+"+IPUtil.getLocalIpAddress());
+        logger.info("连接已建立：" + session.getId() + ";+" + IPUtil.getLocalIpAddress());
         String pathQuery = session.getUri().getQuery();
         Map<String, String> paramMap = CommonUtils.formatUrlParams(pathQuery);
 
@@ -83,23 +80,17 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
         //生成sessionKey 以前的命名规则 我也很懵逼为啥用^^^？？？
         String sessionKey = realName + "^^^" + userName + "^^^" + ts;
         String clientIp = (String) session.getAttributes().get("clientIp");
-        useIpInfo.put(sessionKey,clientIp);
-        if(sessions.get(sessionKey) == null){
+        useIpInfo.put(sessionKey, clientIp);
+        if (sessions.get(sessionKey) == null) {
             sessions.put(sessionKey, session);
         }
         //此处去掉了启动一个空闲UE逻辑
         //如果用户没有使用，则加入排队队列，等待启动ue
-        if (useLinkInfo.get(sessionKey) == null){
+        if (useLinkInfo.get(sessionKey) == null) {
             queueLinkInfo.add(sessionKey);
-            //如果小于最大连接数，则启动ue
-            if(useLinkInfo.size() <= maxLink.get()){
-                //先广播这个用户输出排队信息，再去启动ue，防止前端半天无响应
-                broadcast(buildMessage().toJSONString());
-                startServer.startServer();
-            }
+            broadcast(buildMessage().toJSONString());
         }
     }
-
 
 
     @Override
@@ -109,7 +100,6 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
         // 假设收到 ping，就回 pong
         if ("heartbeat".equalsIgnoreCase(payload)) {
             lastHeartbeat.put(session.getId(), System.currentTimeMillis());
-            session.sendMessage(new TextMessage("pong"));
         }
     }
 
@@ -117,28 +107,11 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
         Integer uePort = Integer.valueOf(input) + 10;
         logger.info("ue启动完成，端口：" + uePort);
         serverLinkInfo.put(uePort, "0");
-//        if (!queueLinkInfo.isEmpty()) {
-//            Long minTs = null;
-//            String queueKey = null;
-//            for (String s : queueLinkInfo) {
-//                try {
-//                    Long listMinTs = Long.valueOf(s.substring(s.lastIndexOf("^^^") + 3));
-//                    if (minTs == null || listMinTs < minTs) {
-//                        minTs = listMinTs;
-//                        queueKey = s;
-//                    }
-//                } catch (NumberFormatException e) {
-//                    logger.error("sessionKey 格式错误: " + s);
-//                }
-//            }
-//            queueLinkInfo.remove(queueKey);
-//            logger.info("分配到的用户" + queueKey);
-//        }
-//        broadcast(buildMessage().toJSONString());
     }
 
     /**
      * 断开连接后
+     *
      * @param session
      * @param status
      * @throws Exception
@@ -163,21 +136,17 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
 
         //执行断开逻辑
         Integer port = useLinkInfo.get(sessionKey);
-        if (port != null){
+        if (port != null) {
             logger.info("断开链接:" + port);
             useLinkInfo.remove(sessionKey);
             killPortServer(port);
-            //如果有人排队 继续启动ue
-            if(queueLinkInfo.size()>0){
-                logger.info("有排队用户，继续启动ue");
-                startServer.startServer();
-            }
         }
         broadcast(buildMessage().toJSONString());
     }
 
     /**
      * 下载模型文件
+     *
      * @param input
      * @return
      */
@@ -271,13 +240,33 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
 
     private String extractFileName(String url) {
         try {
-            return new File(new URL(url.trim()).getPath()).getName();
-        } catch (Exception e) {
+            URL uri = new URL(url.trim());
+            String[] parts = uri.getPath().split("/");
+            if (parts.length >= 2) {
+                // 倒数第二段：文件指纹
+                String idPart = parts[parts.length - 2];
+                // 倒数第一段：原始文件名
+                String lastName = parts[parts.length - 1];
+                int dot = lastName.lastIndexOf('.');
+                if (dot > 0 && dot < lastName.length() - 1) {
+                    // 包含点的后缀，例如 ".fbx"
+                    String ext = lastName.substring(dot);
+                    return idPart + ext;
+                } else {
+                    // 无后缀则只返回 ID
+                    return idPart;
+                }
+            }
+            // 回退：直接按原逻辑
+            String name = new File(uri.getPath()).getName();
+            int dot = name.lastIndexOf('.');
+            return (dot > 0
+                    ? name.substring(0, dot) + name.substring(dot)
+                    : name);
+        } catch (MalformedURLException e) {
             throw new RuntimeException("解析文件名失败：" + url, e);
         }
     }
-
-
 
 
 
@@ -340,6 +329,7 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
 
     /**
      * 广播消息
+     *
      * @param message
      * @throws IOException
      */
@@ -354,6 +344,7 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
 
     /**
      * 构建消息
+     *
      * @return
      */
     public JSONObject buildMessage() {
@@ -412,43 +403,46 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
      * - 若端口可用（空闲），则重启对应 UE 实例
      */
     public void restartUe() {
-        logger.warn("开始执行 UE 崩溃恢复逻辑...");
-
-        // 拷贝端口列表，避免并发修改
-        List<Integer> ports = new ArrayList<>(portPidInfo.keySet());
-
-        for (Integer port : ports) {
-            try {
-                // 等待端口完全释放（即可用），最多等待 10 秒
-                boolean free = waitForPortRelease(port, 10_000);
-
-                if (free) {
-                    logger.warn("端口 {} 已空闲，执行 kill + restart", port);
-                    killPortServer(port);
-                    //当前崩溃用户应该排在第一个等待用户，只需等待UE重启即可，不要再排在末尾了
-                    useLinkInfo.forEach((sessionKey, uPort) -> {
-                        // 在这里对 sessionKey 和 port 做你需要的操作
-                        logger.info("sessionKey=" + sessionKey + ", port=" + uPort);
-                        //因为已经崩溃，从使用队列中移除，添加到第一个排队队列中
-                        if(uPort.equals(port)){
-                            //原子操作删除
-                            useLinkInfo.remove(sessionKey, uPort);
-                            //添加到队列（插队）
-                            queueLinkInfo.add(0, sessionKey);
-                        }
-                    });
-                    startServer.startServer();
-                } else {
-                    logger.info("端口 {} 在等待周期内仍被占用，跳过重启", port);
-                }
-            } catch (Exception e) {
-                logger.error("处理端口 {} 时发生异常：", port, e);
+        //循环UEpid 看崩溃的是哪个端口
+        for (Map.Entry<Integer, Long> entry : portPidInfo.entrySet()) {
+            Integer port = entry.getKey();
+            Long pid = entry.getValue();
+            logger.info("渲染===Port: {} -> PID: {}", port, pid);
+            boolean processAlive = isProcessAlive(pid);
+            if(!processAlive){
+                logger.warn("崩溃UE为PID：{}", pid);
+                //当前崩溃用户应该排在第一个等待用户，只需等待UE重启即可，不要再排在末尾了
+                useLinkInfo.forEach((sessionKey, uPort) -> {
+                    // 在这里对 sessionKey 和 port 做你需要的操作
+                    logger.info("sessionKey=" + sessionKey + ", port=" + uPort);
+                    //因为已经崩溃，从使用队列中移除，添加到第一个排队队列中
+                    if (uPort.equals(port)) {
+//                        原子操作删除
+                        useLinkInfo.remove(sessionKey, uPort);
+                        //添加到队列（插队）
+                        queueLinkInfo.add(0, sessionKey);
+                    }
+                });
+                killPortServer(port);
             }
+
         }
+    }
+
+
+    /**
+     * 判断给定 pid 的进程目录是否存在
+     * @param pid 进程号
+     * @return 存在返回 true，否则 false
+     */
+    public static boolean isProcessAlive(long pid) {
+        Path procPath = Paths.get("/proc", String.valueOf(pid));
+        return Files.exists(procPath);
     }
 
     /**
      * 等待端口完全释放（即可用），最大等待 maxWaitMs 毫秒
+     *
      * @return true = 端口空闲；false = 超时仍被占用
      */
     private boolean waitForPortRelease(int port, int maxWaitMs) {
@@ -472,6 +466,7 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
 
     /**
      * 检查端口是否可用（未被占用），通过尝试绑定 ServerSocket 实现
+     *
      * @return true = 可以绑定（空闲）；false = 绑定失败（被占用）
      */
     private boolean isPortFree(int port) {
@@ -481,7 +476,6 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
             return false;
         }
     }
-
 
 
 }

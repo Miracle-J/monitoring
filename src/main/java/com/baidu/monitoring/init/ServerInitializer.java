@@ -97,22 +97,19 @@ public class ServerInitializer {
 	 * @return
 	 */
 	public Integer startServer() {
-		logger.info("启动UE服务器");
-		if(useLinkInfo.size()>=maxLink.get()){
+		if(serverLinkInfo.size()>=maxLink.get()&&queueLinkInfo.size()>0){
 			logger.warn("当前资源数已满，不再启动新实例！");
 			return -1;
 		}
 		Integer port = null;
 		try {
-			synchronized (postSet) {
-				if (postSet.isEmpty()) {
-					return null;
-				}
-				Iterator<Integer> iterator = postSet.iterator();
-				port = iterator.next();
-				iterator.remove();
+			if (postSet.isEmpty()) {
+				return null;
 			}
-
+			Iterator<Integer> iterator = postSet.iterator();
+			port = iterator.next();
+			iterator.remove();
+			logger.info("启动UE服务器:"+port);
 			List<String> dockerCmd = Arrays.asList(
 				"docker", "run", "-d",
 				"--name", "signalling-" + port,
@@ -125,7 +122,6 @@ public class ServerInitializer {
 				UE_IMAGE_NAME
 			);
 			runCommand(dockerCmd, true);
-
 			String logFileName = "./log_" + port + "_" + System.currentTimeMillis() + ".log";
 			String uePath = localProperties.getPath() + "TwinBaseGH55-Linux-Shipping";
 			System.out.println("UE路径:"+uePath);

@@ -1,10 +1,12 @@
 package com.baidu.monitoring.task;
 
 import com.alibaba.fastjson.JSONObject;
+import com.baidu.monitoring.init.ServerInitializer;
 import com.baidu.monitoring.webscoket.StatusChangeWebsocketHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.WebSocketSession;
@@ -24,45 +26,96 @@ public class ServerIdleScanner {
 
     @Autowired
     private StatusChangeWebsocketHandler statusChangeWebsocketHandler;
-
+    @Autowired
+    @Lazy
+    private ServerInitializer startServer;
 
     /**
-     * 每秒扫描一次 serverLinkInfo，找出 value 为 "0" 的空闲端口 分配给排队用户
+     * 每秒扫描一次 serverLinkInfo：
+     * - 有排队用户时，把空闲端口分配给用户
+     * - 队列为空 & 端口空闲超过5秒时，自动回收
      */
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelay = 1_000)
     public void scanIdlePorts() throws IOException {
+        long now = System.currentTimeMillis();
+
+        // 收集所有当前空闲的端口
         List<Integer> idlePorts = serverLinkInfo.entrySet().stream()
-                .filter(entry -> "0".equals(entry.getValue()))
+                .filter(e -> "0".equals(e.getValue()))
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toList());
 
         if (!idlePorts.isEmpty()) {
             logger.info("发现空闲端口: {}", idlePorts);
+
             if (!queueLinkInfo.isEmpty()) {
-                // 从队列中取出第一个元素，并广播消息
+                // 有排队用户，正常分配
                 String sessionKey = queueLinkInfo.remove(0);
-                for (Integer port : serverLinkInfo.keySet()) {
-                    if(serverLinkInfo.get(port).equals("0")){
-                        // 修改端口状态
-                        serverLinkInfo.put(port, "1");
-                        // 向正在使用的用户队列中添加信息（给用户分配端口）
-                        useLinkInfo.put(sessionKey, port);
-                        // 找到一个以后就结束遍历
-                        break;
-                    }
+                for (Integer port : idlePorts) {
+                    // 分配第一个空闲端口
+                    serverLinkInfo.put(port, "1");
+                    useLinkInfo.put(sessionKey, port);
+                    //已分配端口移除
+                    startedSessions.remove(sessionKey);
+                    idleSince.remove(port);
+                    break;
                 }
-                //广播消息告诉别人第N个用户使用了哪个端口
                 statusChangeWebsocketHandler.broadcast(statusChangeWebsocketHandler.buildMessage().toJSONString());
+            } else {
+                // 无排队用户，检查空闲时长，超过20秒就回收
+                for (Integer port : idlePorts) {
+                    idleSince.compute(port, (p, startTs) -> {
+                        if (startTs == null) {
+                            // 首次检测到空闲，记下时间
+                            return now;
+                        } else if (now - startTs > 3_000) {
+                            // 已空闲超过5秒，回收
+                            logger.info("端口 {} 空闲超过3秒，自动回收", p);
+                            statusChangeWebsocketHandler.killPortServer(p);
+                            // 从 idleSince 中移除，并在 serverLinkInfo 中也清理
+                            return null;
+                        }
+                        // 仍在等待期内，保留原时间
+                        return startTs;
+                    });
+                }
             }
         } else {
             logger.debug("当前无空闲端口");
+            // 同时清理 idleSince 中已不在 serverLinkInfo 的端口
+            idleSince.keySet().removeIf(p -> !serverLinkInfo.containsKey(p));
+        }
+    }
+
+
+    /**
+     * 每 2 秒检查一次 排队队列 有人排队2秒创建一个UE
+     */
+    @Scheduled(fixedRate = 2_000)
+    public void createUe() {
+        int availableSlots = maxLink.get() - serverLinkInfo.size();
+        if (availableSlots <= 0 || queueLinkInfo.isEmpty()) {
+            logger.debug("无排队用户或无空闲端口");
+            return;
+        }
+        for (String session : queueLinkInfo) {
+            // 如果已经启动过，跳过
+            if (startedSessions.contains(session)) {
+                continue;
+            }
+            // 标记为已启动
+            startedSessions.add(session);
+            // 启动 UE
+            logger.info("为排队用户 {} 启动 UE", session);
+            startServer.startServer();
+            break;  // 每个周期只启动一个
         }
     }
 
     /**
-     * 每 20 秒检查一次 WebSocketSession 的心跳状态
+     * 每 3 秒检查一次 WebSocketSession 的心跳状态
      */
-    @Scheduled(fixedRate = 20000)
+    @Scheduled(fixedRate = 3_000)
     public void checkTimeoutSessions() {
         long now = System.currentTimeMillis();
         for (WebSocketSession session : sessions.values()) {

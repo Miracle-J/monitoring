@@ -41,6 +41,12 @@ public class SessionManager {
 	 */
 	public static final Map<String, Integer> useLinkInfo = new ConcurrentHashMap<>();
 
+	/** 记录每个端口何时开始空闲 */
+	public static final ConcurrentMap<Integer, Long> idleSince = new ConcurrentHashMap<>();
+
+	/** 线程安全地存储已启动过 UE 的 session*/
+	public static final Set<String> startedSessions = ConcurrentHashMap.newKeySet();
+
 	/**
 	 * 正在使用的用户ip<sessionKey,ip>
 	 */
