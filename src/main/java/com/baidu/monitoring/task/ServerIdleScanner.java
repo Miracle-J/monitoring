@@ -121,8 +121,9 @@ public class ServerIdleScanner {
         for (WebSocketSession session : sessions.values()) {
             Long lastTime = lastHeartbeat.get(session.getId());
             if (lastTime != null && (now - lastTime > 30000)) {
-                System.out.println("发现超时连接，主动关闭: " + session.getId());
+                logger.warn("发现超时连接，主动关闭: " + session.getId());
                 try {
+                    lastHeartbeat.remove(session.getId());
                     session.close();
                 } catch (IOException e) {
                     e.printStackTrace();
