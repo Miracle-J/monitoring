@@ -87,6 +87,44 @@ public class ServerIdleScanner {
         }
     }
 
+    /**
+     * 每秒扫描一次 serverLinkInfo：
+     * - 有排队用户时，把空闲端口分配给用户
+     * - 队列为空 & 端口空闲超过5秒时，自动回收
+     */
+    @Scheduled(fixedDelay = 1_000)
+    public void scanCollapsePorts() throws IOException {
+        long now = System.currentTimeMillis();
+
+        // 收集所有当前空闲的端口
+        List<Integer> idlePorts = serverLinkInfo.entrySet().stream()
+                .filter(e -> "2".equals(e.getValue()))
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toList());
+
+        if (!idlePorts.isEmpty()) {
+            logger.info("发现崩溃端口: {}", idlePorts);
+
+            for (Integer port : idlePorts) {
+                idleSince.compute(port, (p, startTs) -> {
+                    if (startTs == null) {
+                        // 首次检测到启动，记下时间
+                        return now;
+                    } else if (now - startTs > 10_000) {
+                        // 启动超过10秒，回收
+                        logger.info("端口 {} 启动超过10秒，自动回收", p);
+                        statusChangeWebsocketHandler.killPortServer(p);
+                        startedSessions.pollLast();  // 删除并返回最后一个
+                        // 从 idleSince 中移除，并在 serverLinkInfo 中也清理
+                        return null;
+                    }
+                    // 仍在等待期内，保留原时间
+                    return startTs;
+                });
+            }
+        }
+    }
+
 
     /**
      * 每 2 秒检查一次 排队队列 有人排队2秒创建一个UE
@@ -99,12 +137,12 @@ public class ServerIdleScanner {
             return;
         }
         for (String session : queueLinkInfo) {
-            // 如果已经启动过，跳过
+            // 如果已经启动过，跳过 //TODO
             if (startedSessions.contains(session)) {
                 continue;
             }
             // 标记为已启动
-            startedSessions.add(session);
+            startedSessions.addLast(session);
             // 启动 UE
             logger.info("为排队用户 {} 启动 UE", session);
             startServer.startServer();

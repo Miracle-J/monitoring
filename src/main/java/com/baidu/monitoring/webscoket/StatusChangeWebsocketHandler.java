@@ -250,7 +250,7 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
                 int dot = lastName.lastIndexOf('.');
                 if (dot > 0 && dot < lastName.length() - 1) {
                     // 包含点的后缀，例如 ".fbx"
-                    String ext = lastName.substring(dot);
+                    String ext = lastName.substring(dot).toLowerCase();
                     return idPart + ext;
                 } else {
                     // 无后缀则只返回 ID
