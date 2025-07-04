@@ -29,7 +29,6 @@ public class TwinBaseController {
      */
     @PostMapping("/project/publish")
     public R ueForward (@RequestBody JSONObject input){
-        System.out.println("进入接口："+input);
         return statusChangeWebsocketHandler.ueForward(input);
     }
 

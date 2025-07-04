@@ -151,7 +151,7 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
      * @return
      */
     public R ueForward(JSONObject input) {
-
+        logger.info("进入接口："+input);
         // 创建下载目录（如果不存在）
         File dir = new File(downloadDir);
         if (!dir.exists()) {
@@ -192,17 +192,25 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
             }
         }
         if (allExist) {
-            // 所有文件已存在，立即回调
-            downloadExecutor.submit(() -> notifyCallback(callUrl + "1"));
-        } else {
-            // 部分文件需下载，下载完成后回调
+            // 所有文件已存在，延迟500ms后回调
             downloadExecutor.submit(() -> {
                 try {
-                    latch.await();
-                    notifyCallback(callUrl + "1");
+                    Thread.sleep(500);  // 不阻塞主线程
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
+                notifyCallback(callUrl + "1");
+            });
+        } else {
+            // 有文件需下载，下载后再延迟500ms后回调
+            downloadExecutor.submit(() -> {
+                try {
+                    latch.await(); // 等所有下载完成
+                    Thread.sleep(500); // 延迟
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                notifyCallback(callUrl + "1");
             });
         }
         return R.ok("下载任务已提交");
