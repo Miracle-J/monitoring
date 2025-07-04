@@ -435,7 +435,7 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
      * @param pid 进程号
      * @return 存在返回 true，否则 false
      */
-    public static boolean isProcessAlive(long pid) {
+    public boolean isProcessAlive(long pid) {
         Path procPath = Paths.get("/proc", String.valueOf(pid));
         return Files.exists(procPath);
     }

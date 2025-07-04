@@ -103,16 +103,14 @@ public class ServerIdleScanner {
                 .collect(Collectors.toList());
 
         if (!idlePorts.isEmpty()) {
-            logger.info("发现崩溃端口: {}", idlePorts);
-
             for (Integer port : idlePorts) {
                 idleSince.compute(port, (p, startTs) -> {
                     if (startTs == null) {
                         // 首次检测到启动，记下时间
                         return now;
-                    } else if (now - startTs > 10_000) {
-                        // 启动超过10秒，回收
-                        logger.info("端口 {} 启动超过10秒，自动回收", p);
+                    } else if (now - startTs > 3_000) {
+                        // 启动超过3秒，回收
+                        logger.info("端口 {} 启动超过3秒，自动回收", p);
                         statusChangeWebsocketHandler.killPortServer(p);
                         startedSessions.pollLast();  // 删除并返回最后一个
                         // 从 idleSince 中移除，并在 serverLinkInfo 中也清理
