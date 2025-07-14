@@ -1,5 +1,6 @@
 package com.baidu.monitoring.webscoket;
 
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.baidu.monitoring.init.ServerInitializer;
 import com.baidu.monitoring.util.CommonUtils;
@@ -14,15 +15,15 @@ import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 import org.springframework.web.socket.handler.TextWebSocketHandler;
+import oshi.SystemInfo;
+import oshi.software.os.OSProcess;
+import oshi.software.os.OperatingSystem;
 
 import javax.annotation.PreDestroy;
 import java.io.*;
 import java.net.MalformedURLException;
 import java.net.ServerSocket;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -97,8 +98,10 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         // 这里可以根据 message 内容响应客户端
         String payload = message.getPayload();
+        JSONObject wsMessage = JSONObject.parseObject(payload);
         // 假设收到 ping，就回 pong
-        if ("heartbeat".equalsIgnoreCase(payload)) {
+        if (wsMessage.getString("type").equals("ping")) {
+            session.sendMessage(new TextMessage("{\"type\": \"pong\"}"));
             lastHeartbeat.put(session.getId(), System.currentTimeMillis());
         }
     }
@@ -336,6 +339,51 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
     }
 
     /**
+     * 关闭指定端口signalling 关闭信令
+     */
+    public Integer killSignallingPortServer(Integer port) {
+        try {
+            // 容器名
+            String containerName = "signalling-" + port;
+
+            // Step 1: 优雅停止容器
+            List<String> stopCmd = Arrays.asList("docker", "stop", containerName);
+            ProcessBuilder stopBuilder = new ProcessBuilder(stopCmd);
+            Process stopProcess = stopBuilder.start();
+            stopProcess.waitFor(); // 等待执行完成
+
+            // Step 2: 删除容器
+            List<String> rmCmd = Arrays.asList("docker", "rm", "-f", containerName);
+            ProcessBuilder rmBuilder = new ProcessBuilder(rmCmd);
+            rmBuilder.start();
+
+
+            // Step 4: 清理缓存
+            portPidInfo.remove(port);
+            serverLinkInfo.remove(port);
+            postSet.add(port);
+
+            // 移除正在使用该端口的连接
+            for (Map.Entry<String, Integer> entry : useLinkInfo.entrySet()) {
+                String s = entry.getKey();
+                Integer assignedPort = entry.getValue();
+
+                if (port.equals(assignedPort)) {
+                    // 原子操作：只在当前映射仍然是目标端口时才移除
+                    useLinkInfo.remove(s, port);
+                    startedSessions.remove(s);
+                    queueLinkInfo.add(0, s);
+                }
+            }
+            //广播消息
+            broadcast(buildMessage().toJSONString());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return port;
+    }
+
+    /**
      * 广播消息
      *
      * @param message
@@ -348,7 +396,6 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
             }
         }
     }
-
 
     /**
      * 构建消息
@@ -426,7 +473,7 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
                     //因为已经崩溃，从使用队列中移除，添加到第一个排队队列中
                     if (uPort.equals(port)) {
 //                        原子操作删除
-                        useLinkInfo.remove(sessionKey, uPort);
+//                        useLinkInfo.remove(sessionKey, uPort);
                         //添加到队列（插队）
                         queueLinkInfo.add(0, sessionKey);
                     }
@@ -438,14 +485,16 @@ public class StatusChangeWebsocketHandler extends TextWebSocketHandler {
     }
 
 
+    private final SystemInfo si = new SystemInfo();
+    private final OperatingSystem os = si.getOperatingSystem();
     /**
      * 判断给定 pid 的进程目录是否存在
      * @param pid 进程号
      * @return 存在返回 true，否则 false
      */
     public boolean isProcessAlive(long pid) {
-        Path procPath = Paths.get("/proc", String.valueOf(pid));
-        return Files.exists(procPath);
+        OSProcess process = os.getProcess((int) pid);
+        return process != null && process.getState() != OSProcess.State.INVALID;
     }
 
     /**

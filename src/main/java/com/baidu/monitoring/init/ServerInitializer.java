@@ -171,9 +171,9 @@ public class ServerInitializer {
 					logger.info(prefix + " " + line);
 
 					// 崩溃日志检测（精确匹配标准输出关键字）
-					if (line.contains("Engine crash handling finished")) {
-						handleCrash();
-					}
+//					if (line.contains("Engine crash handling finished")) {
+//						handleCrash();
+//					}
 				}
 			} catch (IOException e) {
 				logger.error("读取进程输出流异常：" + prefix, e);

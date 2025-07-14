@@ -108,9 +108,9 @@ public class ServerIdleScanner {
                     if (startTs == null) {
                         // 首次检测到启动，记下时间
                         return now;
-                    } else if (now - startTs > 3_000) {
+                    } else if (now - startTs > 60_000) {
                         // 启动超过3秒，回收
-                        logger.info("端口 {} 启动超过3秒，自动回收", p);
+                        logger.info("端口 {} 启动超过60秒，自动回收", p);
                         statusChangeWebsocketHandler.killPortServer(p);
                         startedSessions.pollLast();  // 删除并返回最后一个
                         // 从 idleSince 中移除，并在 serverLinkInfo 中也清理
@@ -121,6 +121,24 @@ public class ServerIdleScanner {
                 });
             }
         }
+    }
+
+    /**
+     * 每秒扫描一次 serverLinkInfo：
+     * - 有排队用户时，把空闲端口分配给用户
+     * - 队列为空 & 端口空闲超过5秒时，自动回收
+     */
+    @Scheduled(fixedDelay = 1_000)
+    public void scanCrashedUE() {
+        portPidInfo.entrySet().stream()
+                .forEach(e -> {
+                    // 启动超过3秒，回收
+                    boolean processAlive = statusChangeWebsocketHandler.isProcessAlive(e.getValue());
+                    if(!processAlive){
+                        logger.warn("UE {} 进程已崩溃", e.getValue());
+                        statusChangeWebsocketHandler.killSignallingPortServer(e.getKey());
+                    }
+                });
     }
 
 
