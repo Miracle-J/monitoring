@@ -58,6 +58,7 @@ public class ServerIdleScanner {
                     //已分配端口移除
                     startedSessions.remove(sessionKey);
                     idleSince.remove(port);
+                    logger.info("为用户: {}，分配端口: {}", sessionKey,idlePorts);
                     break;
                 }
                 statusChangeWebsocketHandler.broadcast(statusChangeWebsocketHandler.buildMessage().toJSONString());
