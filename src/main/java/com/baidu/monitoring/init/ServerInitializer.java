@@ -3,6 +3,7 @@ package com.baidu.monitoring.init;
 import com.baidu.monitoring.conf.LocalProperties;
 import static com.baidu.monitoring.util.SessionManager.*;
 
+import com.baidu.monitoring.util.StringUtils;
 import com.baidu.monitoring.webscoket.StatusChangeWebsocketHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -131,10 +132,13 @@ public class ServerInitializer {
 				"-RenderOffScreen",
 				"-PixelStreamingURL=ws://" + nowServerIp.get() + ":" + port,
 				"-PixelStreamingKeyFilter=F5",
+				StringUtils.isEmpty(localProperties.getUeparam())?"":localProperties.getUeparam(),
+				StringUtils.isEmpty(localProperties.getUeparam2())?"":localProperties.getUeparam2(),
 				"-MyWebsocketPort=" + (port + 10),
 				"-MyHttpPort=" + (port - 10),
 				"-Log=./" + logFileName
 			);
+			logger.info("UE启动命令:"+ueCommand);
 			//不实用封装方法runCommand，不适用常驻型进程
 			Process ueProcess = new ProcessBuilder(ueCommand).start();
 			InputStream inputStream = ueProcess.getInputStream();
